@@ -89,11 +89,11 @@ def init_db():
     
     defaults = [
         ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'),
-        ('welcome_text', 'سلام، ای مهمان گرانقدر! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟'),
-        ('group_link_1', 'https://t.me/YourGroup1'),
-        ('group_link_2', 'https://t.me/YourGroup2'),
-        ('group_link_3', 'https://t.me/YourGroup3'),
-        ('group_link_4', 'https://t.me/YourGroup4'),
+        ('welcome_text', 'سلام، ای تازه از راه رسیده عزیز! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟'),
+        ('group_link_1', 'https://t.me/+P3TdacElwwoxNDZk'),
+        ('group_link_2', 'https://t.me/+wWYBCvYNsbA2ZjNk'),
+        ('group_link_3', 'https://t.me/+bEO_LHkUs4M1MGI0'),
+        ('group_link_4', 'https://t.me/+78WDCu5pT-A2Y2I0'),
         ('bot_status', 'on'),
     ]
     for key, value in defaults:
@@ -376,8 +376,8 @@ async def start(update: Update, context):
     # بررسی بلک‌لیست
     if is_blacklisted(user_id):
         await update.message.reply_text(
-            "🚫 **شما در لیست سیاه کملوت قرار دارید و اجازه ثبت‌نام ندارید.**\n"
-            "در صورت اعتراض، با مدیریت تماس بگیرید.",
+            "🚫با عرض پوزش و احترام، به فرمان حاکمان حاکمان کملوت، شما از ورود به کملوت منع شده اید."
+            ,
             parse_mode='Markdown'
         )
         return ConversationHandler.END
@@ -411,7 +411,7 @@ async def start(update: Update, context):
         await update.message.reply_text("⛔ ربات در حال حاضر خاموش است. لطفاً بعداً تلاش کنید.")
         return
     
-    welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟"
+    welcome_text = get_config('welcome_text')
     keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     return WELCOME
