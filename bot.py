@@ -419,7 +419,7 @@ async def start(update: Update, context):
 async def start_registration_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("✍️ لطفاً **اسم واقعی** خود را وارد کن:")
+    await query.message.reply_text("✍️ لطفاً <b>اسم واقعی</b> خود را وارد کنید:")
     return WAITING_REAL_NAME
 
 async def receive_real_name(update: Update, context):
@@ -428,7 +428,7 @@ async def receive_real_name(update: Update, context):
         [InlineKeyboardButton("👧 دختر", callback_data="gender_girl")],
         [InlineKeyboardButton("👦 پسر", callback_data="gender_boy")]
     ]
-    await update.message.reply_text("⚧️ جنسیت خود را انتخاب کن:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("⚧️ جنسیت خود را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
     return WAITING_GENDER
 
 async def receive_gender_callback(update: Update, context):
@@ -436,22 +436,22 @@ async def receive_gender_callback(update: Update, context):
     await query.answer()
     gender = "دختر" if query.data == "gender_girl" else "پسر"
     context.user_data['gender'] = gender
-    await query.message.reply_text(f"✅ جنسیت شما: {gender}\n🗡️ حالا **نام کملوتی** خود را انتخاب کن:")
+    await query.message.reply_text(f"✅ جنسیت شما: {gender}\n🗡️ حالا </b>نام کملوتی<b> خود را انتخاب کنید، نامی که با آن شما در کملوت خواهید زیست.:")
     return WAITING_CAMELOT_NAME
 
 async def receive_camelot_name(update: Update, context):
     context.user_data['camelot_name'] = update.message.text.strip()
-    await update.message.reply_text("🎂 **سن واقعی** خود را به عدد وارد کن:")
+    await update.message.reply_text("🎂 <b>سن واقعی</b> خود را به عدد (کیبورد روی زبان انگلیسی) وارد کن:")
     return WAITING_AGE
 
 async def receive_age(update: Update, context):
     try:
         age = int(update.message.text.strip())
-        if age < 0 or age > 150:
+        if age < 10 or age > 30:
             raise ValueError
         context.user_data['age'] = age
     except:
-        await update.message.reply_text("❌ لطفاً یک عدد معتبر (بین ۰ تا ۱۵۰) وارد کن.")
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر (بین 10 تا 30) وارد کن.")
         return WAITING_AGE
     
     data = context.user_data
@@ -461,8 +461,8 @@ async def receive_age(update: Update, context):
         f"⚧️ جنسیت: {data['gender']}\n"
         f"🗡️ نام کملوتی: {data['camelot_name']}\n"
         f"🎂 سن: {data['age']}\n─────────────────\n"
-        f"⚠️ **توجه**: این اطلاعات قابل تغییر نیست.\n"
-        f"آیا تایید می‌کنی؟"
+        f"⚠️ <b>توجه</b> این اطلاعات قابل تغییر نیست.\n"
+        f"در صورت اشتباه یا فیک بودن اطلاعات، قادر به اخراج شما هستیم؛ آیا قبول می‌کنید؟"
     )
     keyboard = [
         [InlineKeyboardButton("✅ تایید و ادامه", callback_data="confirm_yes")],
@@ -475,7 +475,7 @@ async def confirm_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "confirm_no":
-        welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! 🏰✨ ..."
+        welcome_text = get_config('welcome_text') or "سلام، ای نوشهروند گرانقدر! 🏰✨ ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
@@ -483,10 +483,10 @@ async def confirm_callback(update: Update, context):
     rules_text = get_config('rules_text') or "قوانین کملوت"
     keyboard = [
         [InlineKeyboardButton("✅ تایید میکنم", callback_data="rules_accept")],
-        [InlineKeyboardButton("❌ لغو", callback_data="rules_cancel")]
+        [InlineKeyboardButton("❌ رد", callback_data="rules_cancel")]
     ]
     await query.message.reply_text(
-        f"📜 **قوانین سرزمین کملوت**\n\n{rules_text}\n\nبا ادامه دادن، تمامی قوانین را می‌پذیرید.",
+        f"📜 **قوانین سرزمین کملوت**\n\n{rules_text}\n\nبا ادامه دادن، تمامی قوانین را می‌پذیرید و موظف به تبعیت از این قوانین هستید و با هرگونه قانون شکنی برخورد و حق اعتراض نخواهید داشت.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -515,7 +515,7 @@ async def rules_callback(update: Update, context):
     add_system_log('registration', 'ثبت‌نام جدید', f'کاربر: {data["camelot_name"]} - کد ملی: {national_id}', actor_id=user.id)
     
     await query.message.reply_text(
-        f"📝 درخواست شهروندی شما با موفقیت ثبت و تایید شد.\n\n🪪 کد ملی شما: `{national_id}`",
+        f"📝 درخواست شهروندی شما با موفقیت ثبت و تایید شد.\n\n🪪 کد ملی شما(درحفظ و نگهداری آن کوشا باشید، تنها مدرک هویتی شما کدملی شماست و درصورت فراموشی با از دست دادن آن، غریبه شناخته خواهید شد): `{national_id}`",
         parse_mode='Markdown'
     )
     
@@ -1154,7 +1154,7 @@ async def admin_exile_confirm(update: Update, context):
         add_system_log('admin_action', f'اخراج {user["camelot_name"]}', f'کد ملی قبلی: {user["national_id"]}', actor_id=user_id, target_id=target)
         add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد و به لیست سیاه اضافه شدید.')
         try:
-            await context.bot.send_message(target, f"🚫 **شما از سرزمین کملوت اخراج شدید.**\nکد ملی شما آزاد شد و به لیست سیاه اضافه شدید.", parse_mode='Markdown')
+            await context.bot.send_message(target, f"🚫 <b> طبق حکم صادره فرماندهی، شما محکوم به تبعید از کملوت شده اید! این حکم توسط فرماندهی کملوت قابل تعلیق خواهد بود. خوش آمدید و باتشکر از وقت گذرانی شما در این سرزمین.", parse_mode='Markdown')
         except:
             pass
         await query.edit_message_text(
