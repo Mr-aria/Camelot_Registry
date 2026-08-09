@@ -2089,7 +2089,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lambda u,c: admin_exile_user(u,c, int(u.callback_query.data.split('_')[2])), pattern='^admin_exile_(?!confirm)'))
     app.add_handler(CallbackQueryHandler(admin_cancel_exile, pattern='^admin_cancel_exile$'))
 
-    print("✅ ربات ثبت احوال کملوت با تمام تغییرات راه‌اندازی شد!")
+    print("✅ ربات ثبت احوال کملوت با تمام تغییرات راه‌اندازی شد")
     app.run_polling()
 
 if __name__ == '__main__':
