@@ -30,7 +30,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS citizens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +47,7 @@ def init_db():
             register_time TEXT
         )
     ''')
-    
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS system_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,14 +59,14 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
-    
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +77,8 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
+    # جدول بلک‌لیست
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS blacklist (
             telegram_id INTEGER PRIMARY KEY,
@@ -85,39 +86,43 @@ def init_db():
             reason TEXT
         )
     ''')
-    
-    # جدول جدید برای لینک‌های گروه
+
+    # جدول لینک‌های عضویت (دکمه‌های پایان ثبت‌نام)
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS group_links (
+        CREATE TABLE IF NOT EXISTS join_links (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            title TEXT NOT NULL,
             url TEXT NOT NULL,
-            "order" INTEGER DEFAULT 0
+            position INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # انتقال لینک‌های قدیمی از config به جدول جدید (اگر جدول خالی باشد)
-    cursor.execute("SELECT COUNT(*) FROM group_links")
-    count = cursor.fetchone()[0]
-    if count == 0:
-        for i in range(1, 5):
-            key = f'group_link_{i}'
-            url = get_config(key)
-            if url:
-                name = f'گروه {i}'
-                cursor.execute(
-                    "INSERT INTO group_links (name, url, \"order\") VALUES (?, ?, ?)",
-                    (name, url, i)
-                )
-    
+
     defaults = [
         ('rules_text', 'قوانین سرزمین کملوت:\n1. احترام به یکدیگر\n2. همکاری با شوالیه‌ها\n3. جادو فقط در محدوده مجاز'),
         ('welcome_text', 'سلام، ای تازه از راه رسیده عزیز! 🏰✨\nبه سرزمین باشکوه و افسانه‌ای کملوت خوش آمدی... 🚪🌟'),
+        ('join_message_text', 'خوش آمدید! با استفاده از دکمه‌های زیر، وارد سرزمین شوید.\n\nبه امید موفقیت شما ✨🏰'),
+        ('group_link_1', 'https://t.me/+P3TdacElwwoxNDZk'),
+        ('group_link_2', 'https://t.me/+wWYBCvYNsbA2ZjNk'),
+        ('group_link_3', 'https://t.me/+bEO_LHkUs4M1MGI0'),
+        ('group_link_4', 'https://t.me/+78WDCu5pT-A2Y2I0'),
         ('bot_status', 'on'),
     ]
     for key, value in defaults:
         cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)", (key, value))
-    
+
+    # انتقال یک‌بارهٔ لینک‌های قدیمی به جدول جدید
+    cursor.execute("SELECT COUNT(*) FROM join_links")
+    if cursor.fetchone()[0] == 0:
+        for i in range(1, 5):
+            cursor.execute("SELECT value FROM config WHERE key = ?", (f'group_link_{i}',))
+            row = cursor.fetchone()
+            if row and row[0]:
+                cursor.execute(
+                    "INSERT INTO join_links (title, url, position) VALUES (?, ?, ?)",
+                    (f'🏰 گروه {i}', row[0], i)
+                )
+
     conn.commit()
     conn.close()
     print("✅ دیتابیس ثبت احوال کملوت آماده شد.")
@@ -179,7 +184,7 @@ def save_citizen(data):
     now_shamsi = jdatetime.datetime.now().strftime("%Y/%m/%d")
     now_time = dt.now().strftime("%H:%M:%S")
     role = 'مالک' if data['telegram_id'] == OWNER_ID else 'شهروند'
-    
+
     cursor.execute('''
         INSERT INTO citizens (
             telegram_id, telegram_username, telegram_first_name, real_name,
@@ -206,7 +211,9 @@ def exile_citizen(telegram_id):
     """اخراج کامل کاربر: حذف کد ملی، تغییر نقش، و افزودن به بلک‌لیست"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    # غیرفعال کردن کاربر در دیتابیس شهروندان
     cursor.execute("UPDATE citizens SET national_id = NULL, role = 'شهروند' WHERE telegram_id = ?", (telegram_id,))
+    # افزودن به بلک‌لیست
     cursor.execute("INSERT OR IGNORE INTO blacklist (telegram_id, reason) VALUES (?, ?)", (telegram_id, 'اخراج شده توسط مدیریت'))
     conn.commit()
     conn.close()
@@ -241,54 +248,56 @@ def get_blacklist():
     conn.close()
     return rows
 
-# ==================== توابع مدیریت لینک‌های گروه ====================
-def add_group_link(name, url, order=0):
+# ==================== توابع لینک‌های عضویت ====================
+def get_join_links():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO group_links (name, url, \"order\") VALUES (?, ?, ?)",
-        (name, url, order)
-    )
-    link_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return link_id
-
-def get_group_links():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM group_links ORDER BY \"order\" ASC")
+    cursor.execute("SELECT * FROM join_links ORDER BY position ASC, id ASC")
     rows = cursor.fetchall()
     conn.close()
     return rows
 
-def get_group_link(link_id):
+def get_join_link(link_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM group_links WHERE id = ?", (link_id,))
+    cursor.execute("SELECT * FROM join_links WHERE id = ?", (link_id,))
     row = cursor.fetchone()
     conn.close()
     return row
 
-def update_group_link(link_id, name=None, url=None, order=None):
+def add_join_link(title, url):
     conn = get_db_connection()
     cursor = conn.cursor()
-    if name is not None:
-        cursor.execute("UPDATE group_links SET name = ? WHERE id = ?", (name, link_id))
-    if url is not None:
-        cursor.execute("UPDATE group_links SET url = ? WHERE id = ?", (url, link_id))
-    if order is not None:
-        cursor.execute("UPDATE group_links SET \"order\" = ? WHERE id = ?", (order, link_id))
+    cursor.execute("SELECT COALESCE(MAX(position), 0) + 1 FROM join_links")
+    pos = cursor.fetchone()[0]
+    cursor.execute("INSERT INTO join_links (title, url, position) VALUES (?, ?, ?)", (title, url, pos))
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return new_id
+
+def update_join_link(link_id, field, value):
+    if field not in ('title', 'url', 'position'):
+        return False
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"UPDATE join_links SET {field} = ? WHERE id = ?", (value, link_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_join_link(link_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM join_links WHERE id = ?", (link_id,))
     conn.commit()
     conn.close()
 
-def delete_group_link(link_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM group_links WHERE id = ?", (link_id,))
-    conn.commit()
-    conn.close()
+def is_valid_url(url):
+    url = url.strip()
+    return url.startswith('http://') or url.startswith('https://') or url.startswith('tg://')
 
+# ==================== لاگ و نوتیفیکیشن ====================
 def add_system_log(log_type, title, content, actor_id=None, target_id=None):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -346,15 +355,18 @@ def mark_notification_read(notif_id):
     conn.commit()
     conn.close()
 
+# ==================== پشتیبان‌گیری ====================
+BACKUP_TABLES = ['citizens', 'system_logs', 'config', 'notifications', 'blacklist', 'join_links']
+
 def export_full_backup():
     conn = get_db_connection()
     cursor = conn.cursor()
     backup_data = {
-        'version': '1.0',
+        'version': '1.1',
         'created_at': dt.now(TEHRAN_TZ).isoformat(),
         'tables': {}
     }
-    for table in ['citizens', 'system_logs', 'config', 'notifications', 'blacklist', 'group_links']:
+    for table in BACKUP_TABLES:
         cursor.execute(f"SELECT * FROM {table}")
         rows = cursor.fetchall()
         table_data = []
@@ -375,12 +387,14 @@ def import_full_backup(json_data):
         return False, "فرمت JSON نامعتبر است"
     if 'tables' not in backup_data:
         return False, "ساختار پشتیبان نامعتبر است"
-    
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    for table in ['citizens', 'system_logs', 'config', 'notifications', 'blacklist', 'group_links']:
+    for table in BACKUP_TABLES:
         cursor.execute(f"DELETE FROM {table}")
     for table, rows in backup_data['tables'].items():
+        if table not in BACKUP_TABLES:
+            continue
         if rows:
             columns = list(rows[0].keys())
             placeholders = ','.join(['?'] * len(columns))
@@ -434,24 +448,28 @@ EDIT_RULES_STATE = 900
 EDIT_WELCOME_STATE = 950
 BLACKLIST_ADD_STATE = 1000
 BLACKLIST_REMOVE_STATE = 1001
-GROUP_LINKS_ADD_STATE = 1100
-GROUP_LINKS_EDIT_STATE = 1101
-GROUP_LINKS_EDIT_NAME_STATE = 1102
-GROUP_LINKS_EDIT_URL_STATE = 1103
-GROUP_LINKS_DELETE_CONFIRM_STATE = 1104
+
+# استیت‌های مدیریت لینک‌ها
+LINK_ADD_TITLE = 1100
+LINK_ADD_URL = 1101
+LINK_EDIT_TITLE = 1102
+LINK_EDIT_URL = 1103
+EDIT_JOINTEXT_STATE = 1104
 
 async def start(update: Update, context):
     user_id = update.effective_user.id
-    
+
+    # بررسی بلک‌لیست
     if is_blacklisted(user_id):
         await update.message.reply_text(
-            "🚫با عرض پوزش و احترام، به فرمان حاکمان حاکمان کملوت، شما از ورود به کملوت منع شده اید.",
+            "🚫با عرض پوزش و احترام، به فرمان حاکمان حاکمان کملوت، شما از ورود به کملوت منع شده اید."
+            ,
             parse_mode='Markdown'
         )
         return ConversationHandler.END
-    
+
     existing_user = get_user_by_telegram_id(user_id)
-    
+
     if existing_user:
         await update.message.reply_text(
             f"🏰 شما از قبل به سرزمین کملوت پیوسته‌اید.\n"
@@ -460,7 +478,7 @@ async def start(update: Update, context):
             reply_markup=main_menu_keyboard(user_id)
         )
         return ConversationHandler.END
-    
+
     if user_id == OWNER_ID:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📤 بازگردانی پشتیبان", callback_data="restore_backup")],
@@ -474,11 +492,11 @@ async def start(update: Update, context):
             parse_mode='Markdown'
         )
         return WELCOME
-    
+
     if not is_bot_online(user_id):
         await update.message.reply_text("⛔ ربات در حال حاضر خاموش است. لطفاً بعداً تلاش کنید.")
         return
-    
+
     welcome_text = get_config('welcome_text')
     keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -487,7 +505,7 @@ async def start(update: Update, context):
 async def start_registration_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("✍️ لطفاً <b>اسم واقعی</b> خود را وارد کنید:")
+    await query.message.reply_text("✍️ لطفاً **اسم واقعی** خود را وارد کنید:")
     return WAITING_REAL_NAME
 
 async def receive_real_name(update: Update, context):
@@ -504,12 +522,12 @@ async def receive_gender_callback(update: Update, context):
     await query.answer()
     gender = "دختر" if query.data == "gender_girl" else "پسر"
     context.user_data['gender'] = gender
-    await query.message.reply_text(f"✅ جنسیت شما: {gender}\n🗡️ حالا <b>نام کملوتی</b> خود را انتخاب کنید، نامی که با آن شما در کملوت خواهید زیست.:")
+    await query.message.reply_text(f"✅ جنسیت شما: {gender}\n🗡️ حالا **نام کملوتی** خود را انتخاب کنید، نامی که با آن شما در کملوت خواهید زیست.:")
     return WAITING_CAMELOT_NAME
 
 async def receive_camelot_name(update: Update, context):
     context.user_data['camelot_name'] = update.message.text.strip()
-    await update.message.reply_text("🎂 <b>سن واقعی</b> خود را به عدد (کیبورد روی زبان انگلیسی) وارد کن:")
+    await update.message.reply_text("🎂 **سن واقعی** خود را به عدد (کیبورد روی زبان انگلیسی) وارد کن:")
     return WAITING_AGE
 
 async def receive_age(update: Update, context):
@@ -521,7 +539,7 @@ async def receive_age(update: Update, context):
     except:
         await update.message.reply_text("❌ لطفاً یک عدد معتبر (بین 10 تا 30) وارد کن.")
         return WAITING_AGE
-    
+
     data = context.user_data
     summary = (
         f"📋 **فرم ثبت‌نام شما**\n─────────────────\n"
@@ -529,7 +547,7 @@ async def receive_age(update: Update, context):
         f"⚧️ جنسیت: {data['gender']}\n"
         f"🗡️ نام کملوتی: {data['camelot_name']}\n"
         f"🎂 سن: {data['age']}\n─────────────────\n"
-        f"⚠️ <b>توجه</b> این اطلاعات قابل تغییر نیست.\n"
+        f"⚠️ **توجه** این اطلاعات قابل تغییر نیست.\n"
         f"در صورت اشتباه یا فیک بودن اطلاعات، قادر به اخراج شما هستیم؛ آیا قبول می‌کنید؟"
     )
     keyboard = [
@@ -543,11 +561,11 @@ async def confirm_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "confirm_no":
-        welcome_text = get_config('welcome_text')
+        welcome_text = get_config('welcome_text') or "سلام، ای نوشهروند گرانقدر! 🏰✨ ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
-    
+
     rules_text = get_config('rules_text') or "قوانین کملوت"
     keyboard = [
         [InlineKeyboardButton("✅ تایید میکنم", callback_data="rules_accept")],
@@ -564,11 +582,11 @@ async def rules_callback(update: Update, context):
     query = update.callback_query
     await query.answer()
     if query.data == "rules_cancel":
-        welcome_text = get_config('welcome_text')
+        welcome_text = get_config('welcome_text') or "سلام، ای مهمان گرانقدر! ..."
         keyboard = [[InlineKeyboardButton("بزن بریم 🚀", callback_data="start_registration")]]
         await query.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
         return WELCOME
-    
+
     user = update.effective_user
     data = {
         'telegram_id': user.id,
@@ -581,27 +599,21 @@ async def rules_callback(update: Update, context):
     }
     national_id = save_citizen(data)
     add_system_log('registration', 'ثبت‌نام جدید', f'کاربر: {data["camelot_name"]} - کد ملی: {national_id}', actor_id=user.id)
-    
+
     await query.message.reply_text(
         f"📝 درخواست شهروندی شما با موفقیت ثبت و تایید شد.\n\n🪪 کد ملی شما(درحفظ و نگهداری آن کوشا باشید، تنها مدرک هویتی شما کدملی شماست و درصورت فراموشی با از دست دادن آن، غریبه شناخته خواهید شد): `{national_id}`",
         parse_mode='Markdown'
     )
-    
-    # دریافت لینک‌های گروه از جدول جدید
-    links = get_group_links()
+
+    # --- لینک‌های عضویت داینامیک از پنل مدیریت ---
+    join_text = get_config('join_message_text') or "خوش آمدید! با استفاده از دکمه‌های زیر، وارد سرزمین شوید.\n\nبه امید موفقیت شما ✨🏰"
+    links = get_join_links()
     if links:
-        keyboard = []
-        for link in links:
-            keyboard.append([InlineKeyboardButton(link['name'], url=link['url'])])
-        await query.message.reply_text(
-            "خوش آمدید! با استفاده از دکمه‌های زیر، وارد سرزمین شوید.\n\nبه امید موفقیت شما ✨🏰",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        keyboard = [[InlineKeyboardButton(l['title'], url=l['url'])] for l in links]
+        await query.message.reply_text(join_text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await query.message.reply_text(
-            "خوش آمدید! در حال حاضر هیچ لینکی برای پیوستن تنظیم نشده است.\nلطفاً با مدیریت تماس بگیرید."
-        )
-    
+        await query.message.reply_text(join_text)
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -717,7 +729,7 @@ async def show_panel(query, user_id):
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users")],
             [InlineKeyboardButton("📜 تغییر قوانین", callback_data="admin_edit_rules")],
             [InlineKeyboardButton("💬 تغییر پیام خوش‌آمد", callback_data="admin_edit_welcome")],
-            [InlineKeyboardButton("🔗 مدیریت لینک‌های گروه", callback_data="admin_group_links")],
+            [InlineKeyboardButton("🔗 مدیریت لینک‌های عضویت", callback_data="admin_links")],
             [InlineKeyboardButton("📣 ارسال پیام همگانی", callback_data="admin_broadcast")],
             [InlineKeyboardButton("🚫 مدیریت بلک‌لیست", callback_data="admin_blacklist")],
             [InlineKeyboardButton("📋 لاگ‌های سیستم", callback_data="admin_logs")],
@@ -735,7 +747,7 @@ async def show_panel(query, user_id):
         await query.edit_message_text("⛔ دسترسی ندارید.", reply_markup=main_menu_keyboard(user_id))
         return
     await query.edit_message_text(
-        f"👑 <b>پنل مدیریت</b>\n👤 نقش: {get_role_display(role)}\n🕐 {get_jalali_date()}",
+        f"👑 **پنل مدیریت**\n👤 نقش: {get_role_display(role)}\n🕐 {get_jalali_date()}",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -786,7 +798,7 @@ async def admin_edit_rules_receive(update: Update, context):
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ تغییر قوانین لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     set_config('rules_text', text)
     add_system_log('admin_action', 'تغییر قوانین', f'متن جدید: {text[:100]}...', actor_id=user_id)
     await update.message.reply_text(
@@ -821,7 +833,7 @@ async def admin_edit_welcome_receive(update: Update, context):
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ تغییر پیام خوش‌آمد لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     set_config('welcome_text', text)
     add_system_log('admin_action', 'تغییر پیام خوش‌آمد', f'متن جدید: {text[:100]}...', actor_id=user_id)
     await update.message.reply_text(
@@ -830,313 +842,252 @@ async def admin_edit_welcome_receive(update: Update, context):
     )
     return ConversationHandler.END
 
-# ==================== مدیریت لینک‌های گروه (فقط مالک) ====================
-async def admin_group_links_menu(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    links = get_group_links()
+# ==================== مدیریت لینک‌های عضویت (فقط مالک) ====================
+def build_links_menu():
+    links = get_join_links()
+    text = "🔗 <b>مدیریت لینک‌های عضویت</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
     if not links:
-        text = "🔗 **هیچ لینکی تعریف نشده است.**"
+        text += "هیچ لینکی ثبت نشده است.\n\n"
     else:
-        text = "🔗 **لینک‌های گروه‌ها**\n━━━━━━━━━━━━━━━━━━━\n\n"
-        for link in links:
-            text += f"🆔 {link['id']}\n"
-            text += f"   📌 نام: {escape(link['name'])}\n"
-            text += f"   🔗 آدرس: {escape(link['url'])}\n"
-            text += f"   🔢 ترتیب: {link['order']}\n━━━━━━━━━━━━━━━━━━━\n"
-    
+        for i, l in enumerate(links, 1):
+            text += f"{i}. {escape(str(l['title']))}\n   🔗 {escape(str(l['url']))}\n\n"
+    text += "━━━━━━━━━━━━━━━━━━━\nبرای ویرایش، روی نام هر دکمه کلیک کنید."
+
     keyboard = [
-        [InlineKeyboardButton("➕ افزودن لینک جدید", callback_data="admin_group_links_add")],
-        [InlineKeyboardButton("✏️ ویرایش لینک", callback_data="admin_group_links_edit")],
-        [InlineKeyboardButton("❌ حذف لینک", callback_data="admin_group_links_delete")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")],
+        [InlineKeyboardButton(f"✏️ {l['title']}", callback_data=f"admin_link_edit_{l['id']}")]
+        for l in links
+    ]
+    keyboard.append([InlineKeyboardButton("➕ افزودن دکمه جدید", callback_data="admin_link_add")])
+    keyboard.append([InlineKeyboardButton("💬 تغییر متن پیام لینک‌ها", callback_data="admin_edit_jointext")])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")])
+    return text, InlineKeyboardMarkup(keyboard)
+
+async def admin_links_menu(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    text, kb = build_links_menu()
+    await query.edit_message_text(text, reply_markup=kb, parse_mode='HTML')
+
+async def admin_link_edit_menu(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    link_id = int(query.data.split('_')[3])
+    link = get_join_link(link_id)
+    if not link:
+        await query.edit_message_text(
+            "❌ این لینک وجود ندارد.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_links")]])
+        )
+        return
+    text = (f"🔗 <b>ویرایش دکمه</b>\n━━━━━━━━━━━━━━━━━━━\n"
+            f"📛 نام دکمه: {escape(str(link['title']))}\n"
+            f"🌐 لینک: {escape(str(link['url']))}\n━━━━━━━━━━━━━━━━━━━")
+    keyboard = [
+        [InlineKeyboardButton("✏️ تغییر نام دکمه", callback_data=f"admin_link_name_{link_id}")],
+        [InlineKeyboardButton("🌐 تغییر لینک", callback_data=f"admin_link_url_{link_id}")],
+        [InlineKeyboardButton("🗑 حذف این دکمه", callback_data=f"admin_link_del_{link_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_links")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+async def admin_link_delete_ask(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return
+    link_id = int(query.data.split('_')[3])
+    link = get_join_link(link_id)
+    if not link:
+        await query.edit_message_text(
+            "❌ این لینک وجود ندارد.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="admin_links")]])
+        )
+        return
+    keyboard = [
+        [InlineKeyboardButton("✅ بله، حذف کن", callback_data=f"admin_link_delok_{link_id}")],
+        [InlineKeyboardButton("❌ لغو", callback_data="admin_links")],
     ]
     await query.edit_message_text(
-        text,
+        f"⚠️ آیا از حذف دکمهٔ «{escape(str(link['title']))}» مطمئن هستید؟",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
 
-# ---------- افزودن لینک جدید ----------
-async def admin_group_links_add_start(update: Update, context):
+async def admin_link_delete_confirm(update: Update, context):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
+    link_id = int(query.data.split('_')[3])
+    link = get_join_link(link_id)
+    if link:
+        delete_join_link(link_id)
+        add_system_log('admin_action', 'حذف لینک عضویت',
+                       f"نام: {link['title']} | لینک: {link['url']}", actor_id=user_id)
+    text, kb = build_links_menu()
+    await query.edit_message_text("✅ دکمه حذف شد.\n\n" + text, reply_markup=kb, parse_mode='HTML')
+
+# ---------- افزودن دکمه جدید ----------
+async def admin_link_add_start(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id != OWNER_ID:
+        await query.edit_message_text("⛔ دسترسی ندارید.")
+        return ConversationHandler.END
     await query.edit_message_text(
-        "➕ **افزودن لینک جدید**\n\n"
-        "لطفاً <b>نام</b> دکمه را وارد کنید:\n"
+        "➕ **افزودن دکمهٔ جدید**\n\n"
+        "لطفاً **نام دکمه** را وارد کنید (مثلاً: 🏰 گروه اصلی کملوت)\n"
         "(برای لغو /cancel بزنید)",
         parse_mode='Markdown'
     )
-    return GROUP_LINKS_ADD_STATE
+    return LINK_ADD_TITLE
 
-async def admin_group_links_add_name(update: Update, context):
-    text = update.message.text.strip()
+async def admin_link_add_title(update: Update, context):
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        return ConversationHandler.END
-    context.user_data['group_link_name'] = text
+    title = update.message.text.strip()
+    if len(title) > 60:
+        await update.message.reply_text("❌ نام دکمه بیش از حد بلند است (حداکثر ۶۰ کاراکتر).")
+        return LINK_ADD_TITLE
+    context.user_data['new_link_title'] = title
     await update.message.reply_text(
-        "➕ **افزودن لینک جدید**\n\n"
-        "لطفاً <b>آدرس (URL)</b> لینک را وارد کنید:\n"
+        f"✅ نام دکمه: {title}\n\n"
+        "🌐 حالا **لینک** آن را وارد کنید (باید با https:// شروع شود):\n"
         "(برای لغو /cancel بزنید)",
         parse_mode='Markdown'
     )
-    return GROUP_LINKS_ADD_STATE + 1
+    return LINK_ADD_URL
 
-async def admin_group_links_add_url(update: Update, context):
-    text = update.message.text.strip()
+async def admin_link_add_url(update: Update, context):
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        context.user_data.pop('group_link_name', None)
+    url = update.message.text.strip()
+    if not is_valid_url(url):
+        await update.message.reply_text("❌ لینک نامعتبر است. باید با http:// یا https:// شروع شود.")
+        return LINK_ADD_URL
+    title = context.user_data.pop('new_link_title', None)
+    if not title:
+        await update.message.reply_text("❌ خطا: نام دکمه یافت نشد.")
         return ConversationHandler.END
-    
-    name = context.user_data.get('group_link_name')
-    if not name:
-        await update.message.reply_text("❌ خطا: نام پیدا نشد. از اول شروع کنید.")
-        return ConversationHandler.END
-    
-    # پیدا کردن بیشترین order
-    links = get_group_links()
-    max_order = max([link['order'] for link in links]) if links else 0
-    new_order = max_order + 1
-    
-    add_group_link(name, text, new_order)
-    add_system_log('admin_action', 'افزودن لینک گروه', f'نام: {name} - آدرس: {text}', actor_id=user_id)
-    await update.message.reply_text(
-        f"✅ لینک جدید با موفقیت اضافه شد.\n"
-        f"📌 نام: {name}\n"
-        f"🔗 آدرس: {text}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
-    context.user_data.pop('group_link_name', None)
+    add_join_link(title, url)
+    add_system_log('admin_action', 'افزودن لینک عضویت', f'نام: {title} | لینک: {url}', actor_id=user_id)
+    text, kb = build_links_menu()
+    await update.message.reply_text("✅ دکمهٔ جدید اضافه شد.\n\n" + text, reply_markup=kb, parse_mode='HTML')
     return ConversationHandler.END
 
-# ---------- ویرایش لینک ----------
-async def admin_group_links_edit_start(update: Update, context):
+# ---------- تغییر نام دکمه ----------
+async def admin_link_name_start(update: Update, context):
     query = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    if update.effective_user.id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    links = get_group_links()
-    if not links:
-        await query.edit_message_text("❌ هیچ لینکی برای ویرایش وجود ندارد.")
-        return
-    
-    keyboard = []
-    for link in links:
-        keyboard.append([InlineKeyboardButton(f"✏️ {link['name']} (ID: {link['id']})", callback_data=f"admin_group_links_edit_select_{link['id']}")])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_group_links")])
-    await query.edit_message_text(
-        "✏️ **ویرایش لینک**\n\n"
-        "لطفاً لینک مورد نظر را انتخاب کنید:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def admin_group_links_edit_select(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    link_id = int(query.data.split('_')[4])
-    context.user_data['edit_link_id'] = link_id
-    link = get_group_link(link_id)
+        return ConversationHandler.END
+    link_id = int(query.data.split('_')[3])
+    link = get_join_link(link_id)
     if not link:
-        await query.edit_message_text("❌ لینک یافت نشد.")
-        return
-    
-    keyboard = [
-        [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"admin_group_links_edit_name_{link_id}")],
-        [InlineKeyboardButton("✏️ تغییر آدرس", callback_data=f"admin_group_links_edit_url_{link_id}")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_group_links")],
-    ]
+        await query.edit_message_text("❌ این لینک وجود ندارد.")
+        return ConversationHandler.END
+    context.user_data['link_edit_id'] = link_id
     await query.edit_message_text(
-        f"✏️ **ویرایش لینک**\n\n"
-        f"🆔 ID: {link['id']}\n"
-        f"📌 نام فعلی: {link['name']}\n"
-        f"🔗 آدرس فعلی: {link['url']}\n"
-        f"🔢 ترتیب: {link['order']}\n\n"
-        f"انتخاب کنید چه چیزی را می‌خواهید تغییر دهید:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def admin_group_links_edit_name_start(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    link_id = int(query.data.split('_')[4])
-    context.user_data['edit_link_id'] = link_id
-    await query.edit_message_text(
-        f"✏️ **تغییر نام لینک** (ID: {link_id})\n\n"
-        "لطفاً نام جدید را وارد کنید:\n"
-        "(برای لغو /cancel بزنید)",
+        f"✏️ **تغییر نام دکمه**\nنام فعلی: {link['title']}\n\n"
+        "نام جدید را وارد کنید:\n(برای لغو /cancel بزنید)",
         parse_mode='Markdown'
     )
-    return GROUP_LINKS_EDIT_NAME_STATE
+    return LINK_EDIT_TITLE
 
-async def admin_group_links_edit_name_receive(update: Update, context):
-    text = update.message.text.strip()
+async def admin_link_name_receive(update: Update, context):
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        context.user_data.pop('edit_link_id', None)
-        return ConversationHandler.END
-    
-    link_id = context.user_data.get('edit_link_id')
+    title = update.message.text.strip()
+    link_id = context.user_data.get('link_edit_id')
     if not link_id:
-        await update.message.reply_text("❌ خطا: شناسه لینک پیدا نشد.")
+        await update.message.reply_text("❌ خطا: لینک مشخص نیست.")
         return ConversationHandler.END
-    
-    update_group_link(link_id, name=text)
-    add_system_log('admin_action', 'تغییر نام لینک گروه', f'ID: {link_id} - نام جدید: {text}', actor_id=user_id)
-    await update.message.reply_text(
-        f"✅ نام لینک با موفقیت تغییر کرد.\nنام جدید: {text}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
-    context.user_data.pop('edit_link_id', None)
+    if len(title) > 60:
+        await update.message.reply_text("❌ نام دکمه بیش از حد بلند است (حداکثر ۶۰ کاراکتر).")
+        return LINK_EDIT_TITLE
+    context.user_data.pop('link_edit_id', None)
+    update_join_link(link_id, 'title', title)
+    add_system_log('admin_action', 'تغییر نام لینک عضویت', f'نام جدید: {title}', actor_id=user_id)
+    text, kb = build_links_menu()
+    await update.message.reply_text("✅ نام دکمه به‌روز شد.\n\n" + text, reply_markup=kb, parse_mode='HTML')
     return ConversationHandler.END
 
-async def admin_group_links_edit_url_start(update: Update, context):
+# ---------- تغییر لینک دکمه ----------
+async def admin_link_url_start(update: Update, context):
     query = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    if update.effective_user.id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    link_id = int(query.data.split('_')[4])
-    context.user_data['edit_link_id'] = link_id
+        return ConversationHandler.END
+    link_id = int(query.data.split('_')[3])
+    link = get_join_link(link_id)
+    if not link:
+        await query.edit_message_text("❌ این لینک وجود ندارد.")
+        return ConversationHandler.END
+    context.user_data['link_edit_id'] = link_id
     await query.edit_message_text(
-        f"✏️ **تغییر آدرس لینک** (ID: {link_id})\n\n"
-        "لطفاً آدرس جدید را وارد کنید:\n"
-        "(برای لغو /cancel بزنید)",
+        f"🌐 **تغییر لینک**\nلینک فعلی: {link['url']}\n\n"
+        "لینک جدید را وارد کنید:\n(برای لغو /cancel بزنید)",
         parse_mode='Markdown'
     )
-    return GROUP_LINKS_EDIT_URL_STATE
+    return LINK_EDIT_URL
 
-async def admin_group_links_edit_url_receive(update: Update, context):
-    text = update.message.text.strip()
+async def admin_link_url_receive(update: Update, context):
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    if text.lower() == '/cancel':
-        await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
-        context.user_data.pop('edit_link_id', None)
-        return ConversationHandler.END
-    
-    link_id = context.user_data.get('edit_link_id')
+    url = update.message.text.strip()
+    link_id = context.user_data.get('link_edit_id')
     if not link_id:
-        await update.message.reply_text("❌ خطا: شناسه لینک پیدا نشد.")
+        await update.message.reply_text("❌ خطا: لینک مشخص نیست.")
         return ConversationHandler.END
-    
-    update_group_link(link_id, url=text)
-    add_system_log('admin_action', 'تغییر آدرس لینک گروه', f'ID: {link_id} - آدرس جدید: {text}', actor_id=user_id)
-    await update.message.reply_text(
-        f"✅ آدرس لینک با موفقیت تغییر کرد.\nآدرس جدید: {text}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
-    context.user_data.pop('edit_link_id', None)
+    if not is_valid_url(url):
+        await update.message.reply_text("❌ لینک نامعتبر است. باید با http:// یا https:// شروع شود.")
+        return LINK_EDIT_URL
+    context.user_data.pop('link_edit_id', None)
+    update_join_link(link_id, 'url', url)
+    add_system_log('admin_action', 'تغییر لینک عضویت', f'لینک جدید: {url}', actor_id=user_id)
+    text, kb = build_links_menu()
+    await update.message.reply_text("✅ لینک به‌روز شد.\n\n" + text, reply_markup=kb, parse_mode='HTML')
     return ConversationHandler.END
 
-# ---------- حذف لینک ----------
-async def admin_group_links_delete_start(update: Update, context):
+# ---------- تغییر متن پیام لینک‌ها ----------
+async def admin_edit_jointext_start(update: Update, context):
     query = update.callback_query
     await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
+    if update.effective_user.id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    links = get_group_links()
-    if not links:
-        await query.edit_message_text("❌ هیچ لینکی برای حذف وجود ندارد.")
-        return
-    
-    keyboard = []
-    for link in links:
-        keyboard.append([InlineKeyboardButton(f"❌ {link['name']} (ID: {link['id']})", callback_data=f"admin_group_links_delete_confirm_{link['id']}")])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_group_links")])
+        return ConversationHandler.END
+    current = get_config('join_message_text') or "—"
     await query.edit_message_text(
-        "❌ **حذف لینک**\n\n"
-        "لطفاً لینک مورد نظر برای حذف را انتخاب کنید:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"💬 **متن فعلی پیام لینک‌ها:**\n{current}\n\n"
+        "متن جدید را وارد کنید:\n(برای لغو /cancel بزنید)",
+        parse_mode='Markdown'
     )
+    return EDIT_JOINTEXT_STATE
 
-async def admin_group_links_delete_confirm(update: Update, context):
-    query = update.callback_query
-    await query.answer()
+async def admin_edit_jointext_receive(update: Update, context):
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    link_id = int(query.data.split('_')[4])
-    link = get_group_link(link_id)
-    if not link:
-        await query.edit_message_text("❌ لینک یافت نشد.")
-        return
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ بله، حذف کن", callback_data=f"admin_group_links_delete_do_{link_id}")],
-        [InlineKeyboardButton("❌ لغو", callback_data="admin_group_links")],
-    ]
-    await query.edit_message_text(
-        f"⚠️ **تأیید حذف**\n\n"
-        f"آیا از حذف لینک زیر مطمئن هستید؟\n"
-        f"📌 نام: {link['name']}\n"
-        f"🔗 آدرس: {link['url']}\n\n"
-        f"این عمل قابل بازگشت نیست.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def admin_group_links_delete_do(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await query.edit_message_text("⛔ دسترسی ندارید.")
-        return
-    
-    link_id = int(query.data.split('_')[4])
-    link = get_group_link(link_id)
-    if not link:
-        await query.edit_message_text("❌ لینک یافت نشد.")
-        return
-    
-    delete_group_link(link_id)
-    add_system_log('admin_action', 'حذف لینک گروه', f'ID: {link_id} - نام: {link["name"]}', actor_id=user_id)
-    await query.edit_message_text(
-        f"✅ لینک با موفقیت حذف شد.\n📌 نام: {link['name']}",
-        reply_markup=main_menu_keyboard(user_id)
-    )
+        return ConversationHandler.END
+    set_config('join_message_text', update.message.text)
+    add_system_log('admin_action', 'تغییر متن پیام لینک‌ها', update.message.text[:100], actor_id=user_id)
+    text, kb = build_links_menu()
+    await update.message.reply_text("✅ متن پیام به‌روز شد.\n\n" + text, reply_markup=kb, parse_mode='HTML')
+    return ConversationHandler.END
 
 # ==================== خاموش/روشن کردن ربات ====================
 async def admin_toggle_bot(update: Update, context):
@@ -1169,27 +1120,27 @@ async def admin_users_list(update: Update, context):
     """نمایش لیست کاربران - با آیدی تلگرام"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = update.effective_user.id
     user = get_user_by_telegram_id(user_id)
     if not user or user['role'] not in ['مالک', 'کارمند', 'شاه']:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     try:
         all_users = get_all_citizens()
         if not all_users:
             await query.edit_message_text(
-                "📭 <b>هیچ کاربری ثبت‌نام نکرده.</b>",
+                "📭 **هیچ کاربری ثبت‌نام نکرده.**",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]
                 ]),
                 parse_mode='HTML'
             )
             return
-        
+
         is_employee_or_shah = (user['role'] in ['کارمند', 'شاه'])
-        text = "👥 <b>لیست کاربران</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+        text = "👥 **لیست کاربران**\n━━━━━━━━━━━━━━━━━━━\n\n"
         for idx, u in enumerate(all_users[:20], 1):
             name = escape(str(u['real_name'] or 'ندارد'))
             camelot = escape(str(u['camelot_name'] or 'ندارد'))
@@ -1197,12 +1148,14 @@ async def admin_users_list(update: Update, context):
             age = escape(str(u['age'] or 'ثبت نشده'))
             gender = escape(str(u['gender'] or 'ثبت نشده'))
             telegram_id = u['telegram_id']
-            
+
             if is_employee_or_shah:
+                # کارمند/شاه: اطلاعات محدود + آیدی تلگرام
                 text += f"{idx}. {name} ({camelot})\n"
                 text += f"   🆔 {nid} | 🎂 {age} | ⚧ {gender}\n"
                 text += f"   📱 آیدی: {telegram_id}\n"
             else:
+                # مالک: همه اطلاعات + آیدی تلگرام
                 role_display = escape(str(get_role_display(u['role'])))
                 uname = escape(str(u['telegram_username'] or 'ندارد'))
                 date_reg = escape(str(u['register_date_shamsi'] or 'ندارد'))
@@ -1211,10 +1164,10 @@ async def admin_users_list(update: Update, context):
                 text += f"   🆔 {nid} | 🎂 {age} | ⚧ {gender}\n"
                 text += f"   👑 {role_display} | 📅 {date_reg} - {time_reg}\n"
                 text += f"   📱 آیدی: {telegram_id}\n"
-        
+
         if len(all_users) > 20:
             text += f"\n... و {len(all_users) - 20} کاربر دیگر"
-        
+
         keyboard = [
             [InlineKeyboardButton("🔍 مدیریت کاربر", callback_data="admin_manage_user")],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")],
@@ -1224,7 +1177,7 @@ async def admin_users_list(update: Update, context):
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
-    
+
     except Exception as e:
         logger.error(f"admin_users_list error: {e}")
         try:
@@ -1262,25 +1215,26 @@ async def admin_manage_user_receive(update: Update, context):
     if not actor or actor['role'] not in ['مالک', 'کارمند', 'شاه']:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    
+
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     if not text.isdigit():
         await update.message.reply_text("❌ لطفاً یک عدد وارد کن.")
         return ADMIN_USER_MANAGE_STATE
-    
+
     target = int(text)
     target_user = get_user_by_telegram_id(target)
     if not target_user:
         await update.message.reply_text("❌ کاربری با این آیدی پیدا نشد.")
         return ADMIN_USER_MANAGE_STATE
-    
+
     context.user_data['manage_target'] = target
-    
+
     is_employee_or_shah = (actor['role'] in ['کارمند', 'شاه'])
-    
+
+    # اطلاعات عمومی (همه می‌بینند)
     info = f"""👤 **اطلاعات کاربر**
 ━━━━━━━━━━━━━━━━━━━
 📛 نام: {target_user['real_name']}
@@ -1291,17 +1245,20 @@ async def admin_manage_user_receive(update: Update, context):
 📱 آیدی تلگرام: {target_user['telegram_id']}
 """
     if not is_employee_or_shah:
+        # مالک اطلاعات کامل می‌بینه
         info += f"👑 نقش: {get_role_display(target_user['role'])}\n"
         info += f"📱 یوزرنیم: @{target_user['telegram_username'] or 'ندارد'}\n"
         info += f"📅 ثبت: {target_user['register_date_shamsi']} - {target_user['register_time']}\n"
     info += "━━━━━━━━━━━━━━━━━━━"
-    
+
     if is_employee_or_shah:
+        # کارمند/شاه: فقط دکمه گزارش
         keyboard = [
             [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target}")],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users")],
         ]
     else:
+        # مالک: همه دکمه‌ها
         keyboard = [
             [InlineKeyboardButton("✏️ تغییر نام واقعی", callback_data=f"admin_edit_realname_{target}")],
             [InlineKeyboardButton("✏️ تغییر نام کملوتی", callback_data=f"admin_edit_camelot_{target}")],
@@ -1313,7 +1270,7 @@ async def admin_manage_user_receive(update: Update, context):
             [InlineKeyboardButton("📨 گزارش به مدیریت", callback_data=f"admin_report_{target}")],
             [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users")],
         ]
-    
+
     await update.message.reply_text(info, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     return ConversationHandler.END
 
@@ -1348,24 +1305,24 @@ async def admin_edit_value(update: Update, context):
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    
+
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ تغییر لغو شد.", reply_markup=main_menu_keyboard(user_id))
         context.user_data.pop('edit_field', None)
         context.user_data.pop('edit_target', None)
         return ConversationHandler.END
-    
+
     field = context.user_data.get('edit_field')
     target = context.user_data.get('edit_target')
     if not field or not target:
         await update.message.reply_text("❌ خطا: اطلاعات ناقص.")
         return ConversationHandler.END
-    
+
     old_user = get_user_by_telegram_id(target)
     if not old_user:
         await update.message.reply_text("❌ کاربر یافت نشد.")
         return ConversationHandler.END
-    
+
     if field == 'real_name':
         update_user_field(target, 'real_name', text)
         add_system_log('admin_action', f'تغییر نام واقعی {old_user["camelot_name"]}', f'نام جدید: {text}', actor_id=user_id, target_id=target)
@@ -1374,7 +1331,7 @@ async def admin_edit_value(update: Update, context):
             await context.bot.send_message(target, f"📝 **اطلاعات شما توسط مدیریت تغییر کرد.**\nنام واقعی جدید: `{text}`", parse_mode='Markdown')
         except: pass
         await update.message.reply_text(f"✅ نام واقعی به `{text}` تغییر یافت.", parse_mode='Markdown')
-    
+
     elif field == 'camelot':
         update_user_field(target, 'camelot_name', text)
         add_system_log('admin_action', f'تغییر نام کملوتی {old_user["camelot_name"]}', f'نام جدید: {text}', actor_id=user_id, target_id=target)
@@ -1383,7 +1340,7 @@ async def admin_edit_value(update: Update, context):
             await context.bot.send_message(target, f"📝 **اطلاعات شما توسط مدیریت تغییر کرد.**\nنام کملوتی جدید: `{text}`", parse_mode='Markdown')
         except: pass
         await update.message.reply_text(f"✅ نام کملوتی به `{text}` تغییر یافت.", parse_mode='Markdown')
-    
+
     elif field == 'age':
         try:
             age = int(text)
@@ -1398,7 +1355,7 @@ async def admin_edit_value(update: Update, context):
         except:
             await update.message.reply_text("❌ عدد بین ۰ تا ۱۵۰ وارد کن.")
             return ADMIN_EDIT_STATE
-    
+
     elif field == 'username':
         new_un = text.lstrip('@')
         update_user_field(target, 'telegram_username', new_un)
@@ -1408,7 +1365,7 @@ async def admin_edit_value(update: Update, context):
             await context.bot.send_message(target, f"📝 **اطلاعات شما توسط مدیریت تغییر کرد.**\nیوزرنیم جدید: @{new_un}", parse_mode='Markdown')
         except: pass
         await update.message.reply_text(f"✅ یوزرنیم به `@{new_un}` تغییر یافت.", parse_mode='Markdown')
-    
+
     elif field == 'national':
         if len(text) != 6 or not text.isdigit():
             await update.message.reply_text("❌ کد ملی ۶ رقم است.")
@@ -1424,7 +1381,7 @@ async def admin_edit_value(update: Update, context):
             await context.bot.send_message(target, f"📝 **اطلاعات شما توسط مدیریت تغییر کرد.**\nکد ملی جدید: `{text}`", parse_mode='Markdown')
         except: pass
         await update.message.reply_text(f"✅ کد ملی به `{text}` تغییر یافت.", parse_mode='Markdown')
-    
+
     context.user_data.pop('edit_field', None)
     context.user_data.pop('edit_target', None)
     return ConversationHandler.END
@@ -1437,19 +1394,19 @@ async def admin_change_role(update: Update, context, target_telegram_id):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     target_user = get_user_by_telegram_id(target_telegram_id)
     if not target_user:
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
-    
+
     roles = ['شهروند', 'کارمند', 'شاه']
     keyboard = []
     for role in roles:
         if role != target_user['role']:
             keyboard.append([InlineKeyboardButton(f"👑 {role}", callback_data=f"admin_set_role_{target_telegram_id}_{role}")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_users")])
-    
+
     await query.edit_message_text(
         f"👤 **کاربر:** {target_user['real_name']} ({target_user['camelot_name']})\n"
         f"نقش فعلی: {get_role_display(target_user['role'])}\n\n"
@@ -1465,16 +1422,16 @@ async def admin_set_role(update: Update, context):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     parts = query.data.split('_')
     target = int(parts[3])
     new_role = parts[4]
-    
+
     target_user = get_user_by_telegram_id(target)
     if not target_user:
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
-    
+
     update_user_field(target, 'role', new_role)
     add_system_log('admin_action', f'تغییر نقش {target_user["camelot_name"]}', f'نقش جدید: {new_role}', actor_id=user_id, target_id=target)
     add_notification(target, 'تغییر نقش', f'نقش شما توسط مدیریت به {get_role_display(new_role)} تغییر یافت.')
@@ -1495,12 +1452,12 @@ async def admin_exile_user(update: Update, context, target_telegram_id):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     user = get_user_by_telegram_id(target_telegram_id)
     if not user:
         await query.edit_message_text("❌ کاربر یافت نشد.")
         return
-    
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ بله، اخراج کن", callback_data=f"admin_exile_confirm_{target_telegram_id}")],
         [InlineKeyboardButton("❌ لغو", callback_data="admin_cancel_exile")]
@@ -1528,12 +1485,13 @@ async def admin_exile_confirm(update: Update, context):
         if not user:
             await query.edit_message_text("❌ کاربر یافت نشد.")
             return
-        
+
+        # اخراج کامل با افزودن به بلک‌لیست
         exile_citizen(target)
         add_system_log('admin_action', f'اخراج {user["camelot_name"]}', f'کد ملی قبلی: {user["national_id"]}', actor_id=user_id, target_id=target)
         add_notification(target, 'اخراج از کملوت', f'شما از سرزمین کملوت اخراج شدید. کد ملی شما آزاد شد و به لیست سیاه اضافه شدید.')
         try:
-            await context.bot.send_message(target, f"🚫 <b> طبق حکم صادره فرماندهی، شما محکوم به تبعید از کملوت شده اید! این حکم توسط فرماندهی کملوت قابل تعلیق خواهد بود. خوش آمدید و باتشکر از وقت گذرانی شما در این سرزمین.", parse_mode='Markdown')
+            await context.bot.send_message(target, f"🚫 ** طبق حکم صادره فرماندهی، شما محکوم به تبعید از کملوت شده اید! این حکم توسط فرماندهی کملوت قابل تعلیق خواهد بود. خوش آمدید و باتشکر از وقت گذرانی شما در این سرزمین.", parse_mode='Markdown')
         except:
             pass
         await query.edit_message_text(
@@ -1563,7 +1521,7 @@ async def admin_blacklist_menu(update: Update, context):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     blacklist = get_blacklist()
     if not blacklist:
         text = "🚫 **لیست سیاه خالی است.**"
@@ -1573,13 +1531,17 @@ async def admin_blacklist_menu(update: Update, context):
             tg_id = item['telegram_id']
             reason = escape(str(item['reason'] or 'ندارد'))
             added = item['added_at']
-            added_dt = datetime.strptime(added, '%Y-%m-%d %H:%M:%S')
-            jadded = jdatetime.datetime.fromgregorian(datetime=added_dt)
-            date_str = jadded.strftime('%Y/%m/%d - %H:%M')
+            # تبدیل تاریخ
+            try:
+                added_dt = datetime.strptime(added, '%Y-%m-%d %H:%M:%S')
+                jadded = jdatetime.datetime.fromgregorian(datetime=added_dt)
+                date_str = jadded.strftime('%Y/%m/%d - %H:%M')
+            except:
+                date_str = str(added)
             text += f"🆔 {tg_id}\n"
             text += f"   📝 دلیل: {reason}\n"
             text += f"   🕐 {date_str}\n━━━━━━━━━━━━━━━━━━━\n"
-    
+
     keyboard = [
         [InlineKeyboardButton("➕ افزودن به بلک‌لیست", callback_data="admin_blacklist_add")],
         [InlineKeyboardButton("➖ حذف از بلک‌لیست", callback_data="admin_blacklist_remove")],
@@ -1612,26 +1574,27 @@ async def admin_blacklist_add_receive(update: Update, context):
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    
+
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     if not text.isdigit():
         await update.message.reply_text("❌ لطفاً یک عدد وارد کنید.")
         return BLACKLIST_ADD_STATE
-    
+
     target = int(text)
     if is_blacklisted(target):
         await update.message.reply_text("❌ این کاربر قبلاً در بلک‌لیست است.")
         return ConversationHandler.END
-    
+
+    # بررسی اینکه آیا کاربر در دیتابیس وجود دارد یا خیر (اختیاری)
     user = get_user_by_telegram_id(target)
     if user:
         reason = f'افزوده شده توسط مالک (کاربر: {user["camelot_name"]})'
     else:
         reason = 'افزوده شده توسط مالک (کاربر ناشناس)'
-    
+
     add_to_blacklist(target, reason)
     add_system_log('admin_action', f'افزودن به بلک‌لیست', f'کاربر {target} اضافه شد', actor_id=user_id)
     await update.message.reply_text(
@@ -1662,20 +1625,20 @@ async def admin_blacklist_remove_receive(update: Update, context):
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ دسترسی ندارید.")
         return ConversationHandler.END
-    
+
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     if not text.isdigit():
         await update.message.reply_text("❌ لطفاً یک عدد وارد کنید.")
         return BLACKLIST_REMOVE_STATE
-    
+
     target = int(text)
     if not is_blacklisted(target):
         await update.message.reply_text("❌ این کاربر در بلک‌لیست نیست.")
         return ConversationHandler.END
-    
+
     remove_from_blacklist(target)
     add_system_log('admin_action', f'حذف از بلک‌لیست', f'کاربر {target} حذف شد', actor_id=user_id)
     await update.message.reply_text(
@@ -1710,18 +1673,18 @@ async def admin_report_reason(update: Update, context):
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ گزارش لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     target = context.user_data.get('report_target')
     if not target:
         await update.message.reply_text("❌ خطا: هدف گزارش یافت نشد.")
         return ConversationHandler.END
-    
+
     target_user = get_user_by_telegram_id(target)
     actor = get_user_by_telegram_id(user_id)
     if not target_user or not actor:
         await update.message.reply_text("❌ کاربر یافت نشد.")
         return ConversationHandler.END
-    
+
     report_text = f"""📨 **گزارش جدید از سوی کارمند**
 
 👤 **کارمند گزارش‌دهنده:** {actor['real_name']} ({actor['camelot_name']})
@@ -1745,8 +1708,9 @@ async def admin_report_reason(update: Update, context):
 """
     try:
         await context.bot.send_message(OWNER_ID, report_text, parse_mode='Markdown')
+        # ذخیره گزارش در صندوق پیام مالک
         add_notification(OWNER_ID, 'گزارش جدید', report_text)
-        
+
         await update.message.reply_text(
             f"✅ گزارش شما با موفقیت به مدیریت ارسال شد.\nکاربر: {target_user['camelot_name']}",
             reply_markup=main_menu_keyboard(user_id)
@@ -1757,7 +1721,7 @@ async def admin_report_reason(update: Update, context):
     context.user_data.pop('report_target', None)
     return ConversationHandler.END
 
-# ==================== ارسال پیام همگانی ====================
+# ==================== ارسال پیام همگانی (مالک و کارمند و شاه) ====================
 async def admin_broadcast_start(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -1784,12 +1748,12 @@ async def admin_broadcast_receive(update: Update, context):
     if text.lower() == '/cancel':
         await update.message.reply_text("❌ ارسال پیام لغو شد.", reply_markup=main_menu_keyboard(user_id))
         return ConversationHandler.END
-    
+
     all_users = get_all_citizens()
     if not all_users:
         await update.message.reply_text("❌ هیچ کاربری برای ارسال پیام وجود ندارد.")
         return ConversationHandler.END
-    
+
     await update.message.reply_text(f"📣 در حال ارسال به {len(all_users)} کاربر... لطفاً صبر کنید.", parse_mode='Markdown')
     success = 0
     fail = 0
@@ -1805,7 +1769,7 @@ async def admin_broadcast_receive(update: Update, context):
         except:
             fail += 1
         await asyncio.sleep(0.05)
-    
+
     add_system_log('admin_action', 'ارسال پیام همگانی', f'موفق: {success} - ناموفق: {fail}', actor_id=user_id)
     await update.message.reply_text(
         f"✅ **پیام همگانی ارسال شد.**\nموفق: {success}\nناموفق: {fail}",
@@ -1813,7 +1777,7 @@ async def admin_broadcast_receive(update: Update, context):
     )
     return ConversationHandler.END
 
-# ==================== لاگ‌های سیستم ====================
+# ==================== لاگ‌های سیستم (فقط مالک) ====================
 async def admin_logs_list(update: Update, context, page=0):
     query = update.callback_query
     await query.answer()
@@ -1821,7 +1785,7 @@ async def admin_logs_list(update: Update, context, page=0):
     if user_id != OWNER_ID:
         await query.edit_message_text("⛔ دسترسی ندارید.")
         return
-    
+
     offset = page * LOGS_PER_PAGE
     logs, total = get_system_logs(LOGS_PER_PAGE, offset)
     if not logs:
@@ -1830,16 +1794,19 @@ async def admin_logs_list(update: Update, context, page=0):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_panel")]])
         )
         return
-    
+
     text = f"📋 **لاگ‌های سیستم**\n━━━━━━━━━━━━━━━━━━━\nتعداد کل: {total} | صفحه {page+1}\n━━━━━━━━━━━━━━━━━━━\n\n"
     for log in logs:
-        created = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S')
-        jcreated = jdatetime.datetime.fromgregorian(datetime=created)
-        date_str = jcreated.strftime('%Y/%m/%d - %H:%M')
+        try:
+            created = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S')
+            jcreated = jdatetime.datetime.fromgregorian(datetime=created)
+            date_str = jcreated.strftime('%Y/%m/%d - %H:%M')
+        except:
+            date_str = str(log['created_at'])
         text += f"📌 **{log['title']}**\n"
         text += f"📝 {log['content'][:100]}{'...' if len(log['content']) > 100 else ''}\n"
         text += f"🕐 {date_str}\n━━━━━━━━━━━━━━━━━━━\n"
-    
+
     keyboard = []
     nav_buttons = []
     total_pages = (total + LOGS_PER_PAGE - 1) // LOGS_PER_PAGE
@@ -1850,7 +1817,7 @@ async def admin_logs_list(update: Update, context, page=0):
     if nav_buttons:
         keyboard.append(nav_buttons)
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_panel")])
-    
+
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def admin_logs_page_handler(update: Update, context):
@@ -1858,7 +1825,7 @@ async def admin_logs_page_handler(update: Update, context):
     page = int(query.data.split('_')[3])
     await admin_logs_list(update, context, page)
 
-# ==================== پشتیبان‌گیری و بازیابی ====================
+# ==================== پشتیبان‌گیری و بازیابی (فقط مالک) ====================
 async def admin_backup_menu(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -1952,9 +1919,9 @@ def main():
     init_db()
     if get_config('bot_status') is None:
         set_config('bot_status', 'on')
-    
+
     app = Application.builder().token(BOT_TOKEN).build()
-    
+
     # ثبت‌نام
     reg_conv = ConversationHandler(
         entry_points=[CommandHandler('start', start), CallbackQueryHandler(start_registration_callback, pattern='^start_registration$')],
@@ -1970,31 +1937,63 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(reg_conv)
-    
-    # بازگردانی پشتیبان
+
+    # بازگردانی پشتیبان برای مالک
     restore_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(restore_backup_callback, pattern='^restore_backup$')],
         states={RESTORE_BACKUP_STATE: [MessageHandler(filters.Document.ALL, restore_backup_file)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(restore_conv)
-    
-    # تغییر قوانین
+
+    # تغییر قوانین (مالک)
     edit_rules_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_rules_start, pattern='^admin_edit_rules$')],
         states={EDIT_RULES_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_rules_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_rules_conv)
-    
-    # تغییر پیام خوش‌آمد
+
+    # تغییر پیام خوش‌آمد (مالک)
     edit_welcome_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_edit_welcome_start, pattern='^admin_edit_welcome$')],
         states={EDIT_WELCOME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_welcome_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_welcome_conv)
-    
+
+    # ---------- مدیریت لینک‌های عضویت (مالک) ----------
+    link_add_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_link_add_start, pattern='^admin_link_add$')],
+        states={
+            LINK_ADD_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_link_add_title)],
+            LINK_ADD_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_link_add_url)],
+        },
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(link_add_conv)
+
+    link_name_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_link_name_start, pattern='^admin_link_name_')],
+        states={LINK_EDIT_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_link_name_receive)]},
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(link_name_conv)
+
+    link_url_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_link_url_start, pattern='^admin_link_url_')],
+        states={LINK_EDIT_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_link_url_receive)]},
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(link_url_conv)
+
+    jointext_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_edit_jointext_start, pattern='^admin_edit_jointext$')],
+        states={EDIT_JOINTEXT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_jointext_receive)]},
+        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
+    )
+    app.add_handler(jointext_conv)
+
     # مدیریت بلک‌لیست - افزودن
     blacklist_add_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_blacklist_add_start, pattern='^admin_blacklist_add$')],
@@ -2002,7 +2001,7 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(blacklist_add_conv)
-    
+
     # مدیریت بلک‌لیست - حذف
     blacklist_remove_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_blacklist_remove_start, pattern='^admin_blacklist_remove$')],
@@ -2010,43 +2009,16 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(blacklist_remove_conv)
-    
-    # مدیریت لینک‌های گروه - افزودن (نام و آدرس)
-    group_links_add_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_group_links_add_start, pattern='^admin_group_links_add$')],
-        states={
-            GROUP_LINKS_ADD_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_group_links_add_name)],
-            GROUP_LINKS_ADD_STATE + 1: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_group_links_add_url)],
-        },
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(group_links_add_conv)
-    
-    # مدیریت لینک‌های گروه - ویرایش نام
-    group_links_edit_name_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_group_links_edit_name_start, pattern='^admin_group_links_edit_name_')],
-        states={GROUP_LINKS_EDIT_NAME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_group_links_edit_name_receive)]},
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(group_links_edit_name_conv)
-    
-    # مدیریت لینک‌های گروه - ویرایش آدرس
-    group_links_edit_url_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_group_links_edit_url_start, pattern='^admin_group_links_edit_url_')],
-        states={GROUP_LINKS_EDIT_URL_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_group_links_edit_url_receive)]},
-        fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
-    )
-    app.add_handler(group_links_edit_url_conv)
-    
-    # مدیریت کاربر با آیدی
+
+    # مدیریت کاربر با آیدی (مالک و کارمند و شاه)
     manage_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_manage_user_start, pattern='^admin_manage_user$')],
         states={ADMIN_USER_MANAGE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_manage_user_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(manage_conv)
-    
-    # ویرایش فیلدها
+
+    # ویرایش فیلدها (فقط مالک)
     edit_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(lambda u,c: admin_edit_field_start(u,c, 'real_name', int(u.callback_query.data.split('_')[3])), pattern='^admin_edit_realname_'),
@@ -2059,31 +2031,31 @@ def main():
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(edit_conv)
-    
-    # گزارش کارمند
+
+    # گزارش کارمند (مالک و کارمند و شاه)
     report_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(lambda u,c: admin_report_start(u,c, int(u.callback_query.data.split('_')[2])), pattern='^admin_report_')],
         states={REPORT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_report_reason)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(report_conv)
-    
-    # ارسال پیام همگانی
+
+    # ارسال پیام همگانی (مالک و کارمند و شاه)
     broadcast_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern='^admin_broadcast$')],
         states={ADMIN_BROADCAST_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_receive)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(broadcast_conv)
-    
-    # پشتیبان‌گیری - بازیابی
+
+    # پشتیبان‌گیری - بازیابی (فقط مالک)
     backup_import_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_backup_import_start, pattern='^admin_backup_import$')],
         states={ADMIN_BACKUP_STATE: [MessageHandler(filters.Document.ALL, admin_backup_import_file)]},
         fallbacks=[CommandHandler('start', start), CommandHandler('cancel', start)],
     )
     app.add_handler(backup_import_conv)
-    
+
     # ---------- کالبک‌های اصلی ----------
     app.add_handler(CallbackQueryHandler(panel_callback, pattern='^panel$'))
     app.add_handler(CallbackQueryHandler(admin_users_list, pattern='^admin_users$'))
@@ -2091,33 +2063,32 @@ def main():
     app.add_handler(CallbackQueryHandler(back_to_panel, pattern='^back_to_panel$'))
     app.add_handler(CallbackQueryHandler(my_info_callback, pattern='^my_info$'))
     app.add_handler(CallbackQueryHandler(notifications_callback, pattern='^notifications$'))
-    
-    # مدیریت لینک‌های گروه - منو و انتخاب‌ها
-    app.add_handler(CallbackQueryHandler(admin_group_links_menu, pattern='^admin_group_links$'))
-    app.add_handler(CallbackQueryHandler(admin_group_links_edit_select, pattern='^admin_group_links_edit_select_'))
-    app.add_handler(CallbackQueryHandler(admin_group_links_delete_start, pattern='^admin_group_links_delete$'))
-    app.add_handler(CallbackQueryHandler(admin_group_links_delete_confirm, pattern='^admin_group_links_delete_confirm_'))
-    app.add_handler(CallbackQueryHandler(admin_group_links_delete_do, pattern='^admin_group_links_delete_do_'))
-    
+
+    # مدیریت لینک‌های عضویت
+    app.add_handler(CallbackQueryHandler(admin_links_menu, pattern='^admin_links$'))
+    app.add_handler(CallbackQueryHandler(admin_link_edit_menu, pattern='^admin_link_edit_'))
+    app.add_handler(CallbackQueryHandler(admin_link_delete_confirm, pattern='^admin_link_delok_'))
+    app.add_handler(CallbackQueryHandler(admin_link_delete_ask, pattern='^admin_link_del_'))
+
     # مدیریت بلک‌لیست - منو
     app.add_handler(CallbackQueryHandler(admin_blacklist_menu, pattern='^admin_blacklist$'))
-    
+
     # لاگ‌ها و پشتیبان
     app.add_handler(CallbackQueryHandler(admin_logs_list, pattern='^admin_logs$'))
     app.add_handler(CallbackQueryHandler(admin_logs_page_handler, pattern='^admin_logs_page_'))
     app.add_handler(CallbackQueryHandler(admin_backup_menu, pattern='^admin_backup$'))
     app.add_handler(CallbackQueryHandler(admin_backup_export, pattern='^admin_backup_export$'))
     app.add_handler(CallbackQueryHandler(admin_toggle_bot, pattern='^admin_toggle_bot$'))
-    
-    # تغییر نقش
+
+    # تغییر نقش (مالک)
     app.add_handler(CallbackQueryHandler(lambda u,c: admin_change_role(u,c, int(u.callback_query.data.split('_')[3])), pattern='^admin_change_role_'))
     app.add_handler(CallbackQueryHandler(admin_set_role, pattern='^admin_set_role_'))
-    
-    # اخراج
-    app.add_handler(CallbackQueryHandler(lambda u,c: admin_exile_user(u,c, int(u.callback_query.data.split('_')[2])), pattern='^admin_exile_'))
+
+    # اخراج (مالک) - ابتدا confirm سپس درخواست اخراج
     app.add_handler(CallbackQueryHandler(admin_exile_confirm, pattern='^admin_exile_confirm_'))
+    app.add_handler(CallbackQueryHandler(lambda u,c: admin_exile_user(u,c, int(u.callback_query.data.split('_')[2])), pattern='^admin_exile_(?!confirm)'))
     app.add_handler(CallbackQueryHandler(admin_cancel_exile, pattern='^admin_cancel_exile$'))
-    
+
     print("✅ ربات ثبت احوال کملوت با تمام تغییرات راه‌اندازی شد!")
     app.run_polling()
 
