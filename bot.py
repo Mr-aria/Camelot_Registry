@@ -44,7 +44,9 @@ def init_db():
             national_id TEXT UNIQUE,
             role TEXT DEFAULT 'شهروند',
             register_date_shamsi TEXT,
-            register_time TEXT
+            register_time TEXT,
+            referral_code TEXT UNIQUE,
+            referred_by_code TEXT
         )
     ''')
 
